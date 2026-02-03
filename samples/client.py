@@ -36,6 +36,19 @@ import tritonclient.grpc.aio as grpcclient
 from tritonclient.utils import *
 
 
+
+def qwen_chat_template(user_text: str) -> str:
+    user_text = user_text.strip()
+    return (
+        "<|im_start|>system\n"
+        "You are a helpful assistant.<|im_end|>\n"
+        "<|im_start|>user\n"
+        f"{user_text}<|im_end|>\n"
+        "<|im_start|>assistant\n"
+    )
+
+
+
 class LLMClient:
     def __init__(self, flags: argparse.Namespace):
         self._flags = flags
@@ -113,16 +126,16 @@ class LLMClient:
         # Full list available at:
         # https://github.com/vllmproject/vllm/blob/5255d99dc595f9ae7647842242d6542aa4145a4f/vllm/sampling_params.py#L23
         sampling_parameters = {
-            "temperature": "0.1",
-            "top_p": "0.95",
-            "max_tokens": "100",
+            "temperature": "0.0",
+            "max_tokens": "128",
         }
         exclude_input_in_output = self._flags.exclude_inputs_in_outputs
         if self._flags.lora_name is not None:
             sampling_parameters["lora_name"] = self._flags.lora_name
         with open(self._flags.input_prompts, "r") as file:
             print(f"Loading inputs from `{self._flags.input_prompts}`...")
-            prompts = file.readlines()
+            raw_prompts = file.readlines()
+            prompts = [qwen_chat_template(line) for line in raw_prompts if line.strip()]
 
         success = await self.process_stream(
             prompts, sampling_parameters, exclude_input_in_output
