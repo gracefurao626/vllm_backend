@@ -28,38 +28,35 @@
 
 import argparse
 import asyncio
+import base64
 import json
 import sys
+import urllib.request
 
 import numpy as np
 import tritonclient.grpc.aio as grpcclient
 from tritonclient.utils import *
-from transformers import AutoTokenizer
 
 
-# Initialize tokenizer once
-tokenizer = AutoTokenizer.from_pretrained("Gracefurao626/finetuned-qwen2-vl-7b", trust_remote_code=True)
-
-
-def qwen_chat_template(image_url: str) -> str:
-    """Format multimodal prompt with image URL"""
-    image_url = image_url.strip()
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "image", "image": image_url},
-                {"type": "text", "text": "Detect the bounding box of the nutrition table in the product"},
-            ]
-        }
-    ]
-    
-    prompt = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True
+def build_text_input(instruction: str) -> str:
+    """Match the chat-template used during fine-tuning (Qwen2-VL style)."""
+    instruction = instruction.strip()
+    return (
+        "<|im_start|>system\n"
+        "You are a helpful assistant.<|im_end|>\n"
+        "<|im_start|>user\n"
+        "<|vision_start|><|image_pad|><|vision_end|>"
+        f"{instruction}<|im_end|>\n"
+        "<|im_start|>assistant\n"
     )
-    return prompt
+
+
+def fetch_image_b64_sync(image_url: str) -> str:
+    """Download image bytes from URL and return base64-encoded string."""
+    image_url = image_url.strip()
+    with urllib.request.urlopen(image_url) as resp:
+        img_bytes = resp.read()
+    return base64.b64encode(img_bytes).decode("utf-8")
 
 
 class LLMClient:
@@ -80,15 +77,17 @@ class LLMClient:
         return triton_client
 
     async def async_request_iterator(
-        self, prompts, sampling_parameters, exclude_input_in_output
+        self, requests, sampling_parameters, exclude_input_in_output
     ):
         try:
             for iter in range(self._flags.iterations):
-                for i, prompt in enumerate(prompts):
-                    prompt_id = self._flags.offset + (len(prompts) * iter) + i
+                for i, req in enumerate(requests):
+                    prompt_id = self._flags.offset + (len(requests) * iter) + i
                     self._results_dict[str(prompt_id)] = []
+                    prompt, image_b64 = req
                     yield self.create_request(
                         prompt,
+                        image_b64,
                         self._flags.streaming_mode,
                         prompt_id,
                         sampling_parameters,
@@ -97,13 +96,13 @@ class LLMClient:
         except Exception as error:
             print(f"Caught an error in the request iterator: {error}")
 
-    async def stream_infer(self, prompts, sampling_parameters, exclude_input_in_output):
+    async def stream_infer(self, requests, sampling_parameters, exclude_input_in_output):
         try:
             triton_client = self.get_triton_client()
             # Start streaming
             response_iterator = triton_client.stream_infer(
                 inputs_iterator=self.async_request_iterator(
-                    prompts, sampling_parameters, exclude_input_in_output
+                    requests, sampling_parameters, exclude_input_in_output
                 ),
                 stream_timeout=self._flags.stream_timeout,
             )
@@ -114,14 +113,14 @@ class LLMClient:
             sys.exit(1)
 
     async def process_stream(
-        self, prompts, sampling_parameters, exclude_input_in_output
+        self, requests, sampling_parameters, exclude_input_in_output
     ):
         # Clear results in between process_stream calls
         self.results_dict = []
         success = True
         # Read response from the stream
         async for response in self.stream_infer(
-            prompts, sampling_parameters, exclude_input_in_output
+            requests, sampling_parameters, exclude_input_in_output
         ):
             result, error = response
             if error:
@@ -147,11 +146,24 @@ class LLMClient:
             sampling_parameters["lora_name"] = self._flags.lora_name
         with open(self._flags.input_prompts, "r") as file:
             print(f"Loading inputs from `{self._flags.input_prompts}`...")
-            raw_prompts = file.readlines()
-            prompts = [qwen_chat_template(line) for line in raw_prompts if line.strip()]
+            raw_lines = [ln.strip() for ln in file.readlines() if ln.strip()]
+
+        # prompts.txt should contain image URLs (optionally: "<url>\t<instruction>")
+        requests = []
+        for line in raw_lines:
+            if "\t" in line:
+                image_url, instruction = line.split("\t", 1)
+            else:
+                image_url = line
+                instruction = "Detect the bounding box of the nutrition table in the product"
+
+            # Triton vLLM backend expects base64 image strings.
+            image_b64 = fetch_image_b64_sync(image_url)
+            prompt = build_text_input(instruction)
+            requests.append((prompt, image_b64))
 
         success = await self.process_stream(
-            prompts, sampling_parameters, exclude_input_in_output
+            requests, sampling_parameters, exclude_input_in_output
         )
 
         with open(self._flags.results_file, "w") as file:
@@ -178,6 +190,7 @@ class LLMClient:
     def create_request(
         self,
         prompt,
+        image_b64,
         stream,
         request_id,
         sampling_parameters,
@@ -191,6 +204,11 @@ class LLMClient:
             inputs[-1].set_data_from_numpy(prompt_data)
         except Exception as error:
             print(f"Encountered an error during request creation: {error}")
+
+        # Multimodal: Triton vLLM backend expects each image as a separate base64 string element.
+        image_data = np.array([image_b64.encode("utf-8")], dtype=np.object_)
+        inputs.append(grpcclient.InferInput("image", [1], "BYTES"))
+        inputs[-1].set_data_from_numpy(image_data)
 
         stream_data = np.array([stream], dtype=bool)
         inputs.append(grpcclient.InferInput("stream", [1], "BOOL"))
