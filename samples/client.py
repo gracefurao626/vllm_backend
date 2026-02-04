@@ -34,19 +34,32 @@ import sys
 import numpy as np
 import tritonclient.grpc.aio as grpcclient
 from tritonclient.utils import *
+from transformers import AutoTokenizer
 
 
+# Initialize tokenizer once
+tokenizer = AutoTokenizer.from_pretrained("Gracefurao626/finetuned-qwen2-vl-7b", trust_remote_code=True)
 
-def qwen_chat_template(user_text: str) -> str:
-    user_text = user_text.strip()
-    return (
-        "<|im_start|>system\n"
-        "You are a helpful assistant.<|im_end|>\n"
-        "<|im_start|>user\n"
-        f"{user_text}<|im_end|>\n"
-        "<|im_start|>assistant\n"
+
+def qwen_chat_template(image_url: str) -> str:
+    """Format multimodal prompt with image URL"""
+    image_url = image_url.strip()
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "image": image_url},
+                {"type": "text", "text": "Detect the bounding box of the nutrition table in the product"},
+            ]
+        }
+    ]
+    
+    prompt = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
     )
-
+    return prompt
 
 
 class LLMClient:
