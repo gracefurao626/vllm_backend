@@ -1,4 +1,3 @@
-# data is retrieved from https://huggingface.co/datasets/openfoodfacts/nutrition-table-detection/viewer/default/val
 https://static.openfoodfacts.org/images/products/004/112/907/7641/1.jpg
 https://static.openfoodfacts.org/images/products/007/020/058/1159/1.jpg
 https://static.openfoodfacts.org/images/products/006/414/404/3064/2.jpg
