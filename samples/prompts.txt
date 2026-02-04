@@ -1,3 +1,15 @@
+# data is retrieved from https://huggingface.co/datasets/openfoodfacts/nutrition-table-detection/viewer/default/val
 https://static.openfoodfacts.org/images/products/004/112/907/7641/1.jpg
 https://static.openfoodfacts.org/images/products/007/020/058/1159/1.jpg
+https://static.openfoodfacts.org/images/products/006/414/404/3064/2.jpg
+https://static.openfoodfacts.org/images/products/005/150/070/0167/1.jpg
+https://static.openfoodfacts.org/images/products/001/644/710/0951/1.jpg
+https://static.openfoodfacts.org/images/products/26195070/4.jpg
+https://static.openfoodfacts.org/images/products/004/124/464/1024/3.jpg
+https://static.openfoodfacts.org/images/products/26235066/5.jpg
+https://static.openfoodfacts.org/images/products/357/149/267/0004/7.jpg
+https://static.openfoodfacts.org/images/products/325/622/480/6950/3.jpg
+
+
+
 
